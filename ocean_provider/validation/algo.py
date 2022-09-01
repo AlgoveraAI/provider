@@ -158,7 +158,6 @@ class WorkflowValidator:
 
         self.validated_output_dict = build_stage_output_dict(
             output_def,
-            self.dataset_service_endpoint,
             self.consumer_address,
             self.provider_wallet,
         )
@@ -552,10 +551,8 @@ class InputItemValidator:
         return True
 
 
-def build_stage_output_dict(output_def, service_endpoint, owner, provider_wallet):
+def build_stage_output_dict(output_def, owner, provider_wallet):
     config = get_config()
-    # if BaseURLs.SERVICES_URL in service_endpoint:
-    #     service_endpoint = service_endpoint.split(BaseURLs.SERVICES_URL)[0]
 
     return dict({"metadataUri": config.aquarius_url})
 
