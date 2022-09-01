@@ -49,7 +49,7 @@ class WorkflowValidator:
         self.workflow["stages"].append(
             {
                 "index": 0,
-                "input": self.validated_inputs,
+                "input": self.validated_dataset_inputs,
                 "compute": {
                     "Instances": 1,
                     "namespace": "ocean-compute",
@@ -64,7 +64,6 @@ class WorkflowValidator:
 
     def validate_input(self, index=0):
         """Validates input dictionary."""
-        main_input = self.data["dataset"]
         additional_inputs = self.data.get("additionalDatasets", list())
 
         if not additional_inputs:
@@ -74,15 +73,18 @@ class WorkflowValidator:
             self.error = "Additional input is invalid or can not be decoded."
             return False
 
-        all_data = [main_input] + additional_inputs
-        algo_data = self.data["algorithm"]
+        self.data["dataset"] = [self.data["dataset"]] + additional_inputs
 
-        self.validated_inputs = []
+        self.validated_dataset_inputs = []
         valid_until_list = []
         provider_fee_amounts = []
 
-        for index, input_item in enumerate(all_data):
-            input_item["algorithm"] = algo_data
+
+        for index in range(len(self.data["dataset"])):
+            input_item = {}
+            input_item["dataset"] = self.data["dataset"][index]
+            input_item["algorithm"] = self.data["algorithm"]
+
             input_item_validator = InputItemValidator(
                 self.web3,
                 self.consumer_address,
@@ -98,27 +100,29 @@ class WorkflowValidator:
                 self.error = prefix + input_item_validator.error
                 return False
 
-            self.validated_inputs.append(input_item_validator.validated_inputs)
-            valid_until_list.append(input_item_validator.valid_until)
-            provider_fee_amounts.append(input_item_validator.provider_fee_amount)
+            if self.data.get("dataset")[index]:
+                self.validated_dataset_inputs.append(input_item_validator.validated_inputs)
+                valid_until_list.append(input_item_validator.valid_until)
+                provider_fee_amounts.append(input_item_validator.provider_fee_amount)
 
-            if index == 0:
-                self.service_endpoint = input_item_validator.service.service_endpoint
+                if index == 0:
+                    self.dataset_service_endpoint = input_item_validator.dataset_service.service_endpoint
 
-        status = self._build_and_validate_algo(algo_data)
+        status = self._build_and_validate_algo(self.data["algorithm"])
+
         if not status:
             return False
 
-        if algo_data.get("documentId"):
+        if self.data["algorithm"].get("documentId"):
             valid_until_list.append(self.algo_valid_until)
             provider_fee_amounts.append(self.algo_fee_amount)
 
-        self.valid_until = max(valid_until_list)
+        self.dataset_valid_until = max(valid_until_list)
 
         provider_fee_token = get_provider_fee_token(self.web3.chain_id)
 
         required_provider_fee = get_provider_fee_amount(
-            self.valid_until,
+            self.dataset_valid_until,
             self.data.get("environment"),
             self.web3,
             provider_fee_token,
@@ -134,12 +138,13 @@ class WorkflowValidator:
             return False
 
         self.agreement_id = None
-        for index, input_item in enumerate(all_data):
-            if index == paid_provider_fees_index:
-                self.agreement_id = input_item["transferTxId"]
+        if self.data.get("dataset")[index]:
+            for index, input_item in enumerate(self.data["dataset"]):
+                if index == paid_provider_fees_index:
+                    self.agreement_id = input_item["transferTxId"]
 
         if not self.agreement_id:
-            self.agreement_id = algo_data["transferTxId"]
+            self.agreement_id = self.data["algorithm"]["transferTxId"]
 
         return True
 
@@ -153,7 +158,7 @@ class WorkflowValidator:
 
         self.validated_output_dict = build_stage_output_dict(
             output_def,
-            self.service_endpoint,
+            self.dataset_service_endpoint,
             self.consumer_address,
             self.provider_wallet,
         )
@@ -322,75 +327,34 @@ class InputItemValidator:
         self.extra_data = extra_data
         self.index = index
         self.check_usage = check_usage
+        self.dataset_service = None
 
     def validate(self):
-        required_keys = (
-            ["documentId", "transferTxId"] if self.check_usage else ["documentId"]
-        )
 
-        for req_item in required_keys:
-            if not self.data.get(req_item):
-                self.error = f"No {req_item} in input item."
+        if self.data.get("dataset"):
+            if not self.validate_dataset():
                 return False
 
-        if not self.data.get("serviceId") and self.data.get("serviceId") != 0:
-            self.error = "No serviceId in input item."
-            return False
-
-        self.did = self.data.get("documentId")
-        self.asset = get_asset_from_metadatastore(get_metadata_url(), self.did)
-
-        if not self.asset:
-            self.error = f"Asset for did {self.did} not found."
-            return False
-
-        self.service = self.asset.get_service_by_id(self.data["serviceId"])
-
-        if not self.service:
-            self.error = f"Service id {self.data['serviceId']} not found."
-            return False
-
-        consumable, message = check_asset_consumable(
-            self.asset, self.consumer_address, logger, self.service.service_endpoint
-        )
-
-        if not consumable:
-            self.error = message
-            return False
-
-        if self.service.type not in ["access", "compute"]:
-            self.error = "Services in input can only be access or compute."
-            return False
-
-        if self.service.type != "compute" and self.index == 0:
-            self.error = "Service for main asset must be compute."
-            return False
-
-        asset_urls = get_service_files_list(
-            self.service, self.provider_wallet, self.asset
-        )
-        if self.service.type == "compute" and not asset_urls:
-            self.error = "Services in input with compute type must be in the same provider you are calling."
-            return False
-
-        if self.service.type == "compute":
+        if self.data.get("algorithm"):
             if not self.validate_algo():
                 return False
 
-        self.validated_inputs = {
-            "index": self.index,
-            "id": self.did,
-            "remote": {
-                "txId": self.data.get("transferTxId"),
-                "serviceId": self.service.id,
-            },
-        }
+        if self.data.get("dataset"):
+            self.validated_dataset_inputs = {
+                "index": self.index,
+                "id": self.dataset_did,
+                "remote": {
+                    "txId": self.data["dataset"].get("transferTxId"),
+                    "serviceId": self.dataset_service.id,
+                },
+            }
 
-        userdata = self.data.get("userdata")
-        if userdata:
-            self.validated_inputs["remote"]["userdata"] = userdata
+            userdata = self.data["dataset"].get("userdata")
+            if userdata:
+                self.validated_dataset_inputs["remote"]["userdata"] = userdata
 
-        return self.validate_usage() if self.check_usage else True
+            return self.validate_usage() if self.check_usage else True
+        return True
 
     def _validate_trusted_algos(
         self, algorithm_did, trusted_algorithms, trusted_publishers
@@ -469,6 +433,61 @@ class InputItemValidator:
 
         return True
 
+    def validate_dataset(self):
+        """Validates dataset details that allow the dataset dict to be built."""
+        dataset_data = self.data["dataset"]
+
+        required_keys = (
+            ["documentId", "transferTxId"] if self.check_usage else ["documentId"]
+        )
+
+        for req_item in required_keys:
+            if not dataset_data.get(req_item):
+                self.error = f"No {req_item} in input item."
+                return False
+
+        if not dataset_data.get("serviceId") and dataset_data.get("serviceId") != 0:
+            self.error = "No serviceId in input item."
+            return False
+
+        self.dataset_did = dataset_data.get("documentId")
+        self.dataset_asset = get_asset_from_metadatastore(get_metadata_url(), self.dataset_did)
+
+        if not self.dataset_asset:
+            self.error = f"Asset for did {self.dataset_did} not found."
+            return False
+
+        self.dataset_service = self.dataset_asset.get_service_by_id(dataset_data["serviceId"])
+
+        if not self.dataset_service:
+            self.error = f"Service id {dataset_data['serviceId']} not found."
+            return False
+
+        consumable, message = check_asset_consumable(
+            dataset_service, self.consumer_address, logger, self.dataset_service.service_endpoint
+        )
+
+        if not consumable:
+            self.error = message
+            return False
+
+        if self.dataset_service.type not in ["access", "compute"]:
+            self.error = "Services in input can only be access or compute."
+            return False
+
+        if self.dataset_service.type != "compute" and self.index == 0:
+            self.error = "Service for main asset must be compute."
+            return False
+
+        asset_urls = get_service_files_list(
+            self.dataset_service, self.provider_wallet, self.dataset_asset
+        )
+        if self.dataset_service.type == "compute" and not asset_urls:
+            self.error = "Services in input with compute type must be in the same provider you are calling."
+            return False
+
+        return True
+
     def validate_algo(self):
         """Validates algorithm details that allow the algo dict to be built."""
         algo_data = self.data["algorithm"]
@@ -478,26 +497,27 @@ class InputItemValidator:
             self.error = "both meta and documentId are missing from algorithm input, at least one of these is required."
             return False
 
-        privacy_options = self.service.compute_dict
+        if self.dataset_service:
+            privacy_options = self.dataset_service.compute_dict
 
-        if algorithm_did:
-            return self._validate_trusted_algos(
-                algorithm_did,
-                privacy_options.get("publisherTrustedAlgorithms", []),
-                privacy_options.get("publisherTrustedAlgorithmPublishers", []),
-            )
+            if algorithm_did:
+                return self._validate_trusted_algos(
+                    algorithm_did,
+                    privacy_options.get("publisherTrustedAlgorithms", []),
+                    privacy_options.get("publisherTrustedAlgorithmPublishers", []),
+                )
 
-        allow_raw_algo = privacy_options.get("allowRawAlgorithm", False)
-        if allow_raw_algo is False:
-            self.error = f"cannot run raw algorithm on this did {self.did}."
-            return False
+            allow_raw_algo = privacy_options.get("allowRawAlgorithm", False)
+            if allow_raw_algo is False:
+                self.error = f"cannot run raw algorithm on this did {self.did}."
+                return False
 
         return True
 
     def validate_usage(self):
         """Verify that the tokens have been transferred to the provider's wallet."""
-        tx_id = self.data.get("transferTxId")
-        token_address = self.service.datatoken_address
+        tx_id = self.data["dataset"].get("transferTxId")
+        token_address = self.dataset_service.datatoken_address
         logger.debug("Validating ASSET usage.")
 
         try:
@@ -505,18 +525,18 @@ class InputItemValidator:
                 self.web3,
                 self.consumer_address,
                 tx_id,
-                self.asset,
-                self.service,
+                self.dataset_asset,
+                self.dataset_service,
                 self.extra_data,
             )
-            self.valid_until = _provider_fees_log.args.validUntil
+            self.dataset_valid_until = _provider_fees_log.args.validUntil
             self.provider_fee_amount = _provider_fees_log.args.providerFeeAmount
             validate_transfer_not_used_for_other_service(
-                self.did, self.service.id, tx_id, self.consumer_address, token_address
+                self.dataset_did, self.dataset_service.id, tx_id, self.consumer_address, token_address
             )
             record_consume_request(
-                self.did,
-                self.service.id,
+                self.dataset_did,
+                self.dataset_service.id,
                 tx_id,
                 self.consumer_address,
                 token_address,
@@ -534,8 +554,8 @@ class InputItemValidator:
 
 def build_stage_output_dict(output_def, service_endpoint, owner, provider_wallet):
     config = get_config()
-    if BaseURLs.SERVICES_URL in service_endpoint:
-        service_endpoint = service_endpoint.split(BaseURLs.SERVICES_URL)[0]
+    # if BaseURLs.SERVICES_URL in service_endpoint:
+    #     service_endpoint = service_endpoint.split(BaseURLs.SERVICES_URL)[0]
 
     return dict({"metadataUri": config.aquarius_url})
 
