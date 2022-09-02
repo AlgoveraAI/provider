@@ -293,9 +293,6 @@ class UnsignedComputeRequest(CustomJsonRequest):
 class ComputeStartRequest(CustomJsonRequest):
     def rules(self):
         return {
-            "dataset.documentId": ["bail", "required"],
-            "dataset.serviceId": ["bail", "required"],
-            "dataset.transferTxId": ["required"],
             "algorithm.documentId": [
                 "required_without:algorithm.meta",
                 "required_with_all:algorithm.serviceId,algorithm.transferTxId",
@@ -305,7 +302,7 @@ class ComputeStartRequest(CustomJsonRequest):
             "nonce": ["bail", "required", "numeric"],
             "signature": [
                 "bail",
-                "signature:consumerAddress,dataset.documentId,jobId,nonce",
+                "signature:consumerAddress,algorithm.documentId,jobId,nonce",
             ],
         }
 

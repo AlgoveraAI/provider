@@ -118,7 +118,7 @@ def comb_for_valid_transfer_and_fees(all_datasets, compute_env):
 
 
 def get_provider_fees_or_remote(
-    asset, service, consumer_address, valid_until, compute_env, force_zero, dataset
+    asset, service, consumer_address, valid_until, compute_env, force_zero, dataset=None
 ):
     valid_order = None
     if "transferTxId" in dataset:

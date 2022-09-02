@@ -101,8 +101,8 @@ class WorkflowValidator:
                 return False
 
             if self.data.get("dataset")[index]:
-                self.validated_dataset_inputs.append(input_item_validator.validated_inputs)
-                valid_until_list.append(input_item_validator.valid_until)
+                self.validated_dataset_inputs.append(input_item_validator.validated_dataset_inputs)
+                valid_until_list.append(input_item_validator.dataset_valid_until)
                 provider_fee_amounts.append(input_item_validator.provider_fee_amount)
 
                 if index == 0:
@@ -463,7 +463,7 @@ class InputItemValidator:
             return False
 
         consumable, message = check_asset_consumable(
-            dataset_service, self.consumer_address, logger, self.dataset_service.service_endpoint
+            self.dataset_asset, self.consumer_address, logger, self.dataset_service.service_endpoint
         )
 
         if not consumable:

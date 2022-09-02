@@ -128,18 +128,26 @@ def initializeCompute():
     web3 = get_web3()
     approve_params = {"datasets": []} if datasets else {}
 
+    if datasets:
+      all_datasets = datasets + [algorithm]
+    else:
+      all_datasets = [algorithm]
+
     index_for_provider_fees = comb_for_valid_transfer_and_fees(
-        datasets + [algorithm], compute_env
+        all_datasets, compute_env
     )
 
-    for i, dataset in enumerate(datasets):
-        dataset["algorithm"] = algorithm
-        dataset["consumerAddress"] = consumer_address
+    for i in range(len(data.get("datasets"))):
+        input_item = {}
+        input_item["dataset"] = data["datasets"][i]
+        input_item["algorithm"] = data["algorithm"]
+        input_item["consumerAddress"] = data.get("consumerAddress")
+
         input_item_validator = InputItemValidator(
             web3,
             consumer_address,
             provider_wallet,
-            dataset,
+            input_item,
             {"environment": compute_env},
             i,
             check_usage=False,
@@ -149,19 +157,20 @@ def initializeCompute():
             prefix = f"Error in input at index {i}: "
             return error_response(prefix + input_item_validator.error, 400, logger)
 
-        service = input_item_validator.service
+        service = input_item_validator.dataset_service
 
-        approve_params["datasets"].append(
-            get_provider_fees_or_remote(
-                input_item_validator.asset,
-                service,
-                consumer_address,
-                valid_until,
-                compute_env,
-                (i != index_for_provider_fees),
-                dataset,
-            )
-        )
+        if input_item["dataset"]:
+          approve_params["datasets"].append(
+              get_provider_fees_or_remote(
+                  input_item_validator.dataset_asset,
+                  service,
+                  consumer_address,
+                  valid_until,
+                  compute_env,
+                  (i != index_for_provider_fees),
+                  input_item,
+              )
+          )
 
     if algorithm.get("documentId"):
         algo = get_asset_from_metadatastore(
@@ -184,7 +193,7 @@ def initializeCompute():
             consumer_address,
             valid_until,
             compute_env,
-            (index_for_provider_fees != len(datasets)),
+            (index_for_provider_fees != len(data.get("datasets"))),
             algorithm,
         )
 
@@ -446,7 +455,7 @@ def computeStart():
         "owner": consumer_address,
         "providerAddress": provider_wallet.address,
         "environment": compute_env,
-        "validUntil": validator.valid_until,
+        "validUntil": validator.dataset_valid_until,
         "nonce": nonce,
         "chainId": web3.chain_id,
     }
