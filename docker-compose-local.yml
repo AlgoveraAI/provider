@@ -3,13 +3,13 @@ version: '3'
 services:
 
   provider:
-    image: algocean/provider
+    # image: algocean/provider
     build:
       context: ./
       dockerfile: Dockerfile
-    # image: oceanprotocol/provider-py:${PROVIDER_VERSION:-latest}
+    image: oceanprotocol/provider-py:${PROVIDER_VERSION:-latest}
     ports:
-      - 8030:8030
+      - 8031:8030
     networks:
       backend:
         ipv4_address: 172.15.0.4
